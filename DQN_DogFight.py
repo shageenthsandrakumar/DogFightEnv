@@ -1,4 +1,4 @@
-import gym_env_test
+import gym_env
 
 import pickle
 import gymnasium as gym
@@ -18,11 +18,11 @@ from torchrl.data import ReplayBuffer, ListStorage
 #np.random.seed(834771)
 
 # Define gym environment
-env = gym.make("gym_env_test/DogFight", render_mode = "human")
+env = gym.make("gym_env/DogFight", render_mode = "human")
 
 device = torch.device("cpu")
 
-episodes_done = 4500
+episodes_done = 0
 
 # Utilize replay memory for more efficient learning (break correlation between samples of experience)
 # Use transitions observed by agent, state, action, next state, and resulting reward
@@ -87,19 +87,16 @@ n_observations = len(state)
 policy_net = DQN(n_observations, n_actions).to(device)
 target_net = DQN(n_observations, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
-policy_net.load_state_dict(torch.load("./checkpoints/04499_policy.chkpt"))
-target_net.load_state_dict(torch.load("./checkpoints/04499_target.chkpt"))
-policy_net.eval()
-target_net.eval()
+#policy_net.load_state_dict(torch.load("./checkpoints/04499_policy.chkpt"))
+#target_net.load_state_dict(torch.load("./checkpoints/04499_target.chkpt"))
+#policy_net.eval()
+#target_net.eval()
 
 # AdamW optimizer w/ parameters set
 optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad = True)
 # Set replay memory capacity to first 30 sec of experiences
 # over the last 1000 episodes
 memory = ReplayMemory(200 * 45 * env.metadata["render_fps"])
-#memory = ReplayBuffer(batch_size=BATCH_SIZE, collate_fn=lambda x: x, storage=ListStorage(250*120*env.metadata["render_fps"]), prefetch=8, pin_memory = True)
-#with open("memory.pkl", "rb") as file:
-#    memory = pickle.load(file)
 
 # Steps done for eps-greedy algorithm
 # As steps grow, make it less likely to choose actions randomly
@@ -187,7 +184,6 @@ while i < num_episodes:
             shooting_flags.append(info)
         else:
             memory.push(state, action, next_state, reward)
-#            memory.add((state, action, next_state, reward))
             optimize_model()
     
             target_net_state_dict = target_net.state_dict()
@@ -230,10 +226,8 @@ while i < num_episodes:
                         shooting_transitions[y][2],
                         torch.tensor([new_reward], device = device)
                     )
-#                    print(f"Reward for shooting missile {miss_missile_id}: {shooting_flags[x]['miss_rewards'][idx]}")
                 y -= 1
         memory.push(*(transition))
-#        memory.add((transition))
         optimize_model()
 
         target_net_state_dict = target_net.state_dict()
@@ -245,25 +239,23 @@ while i < num_episodes:
     episodes_done += 1
     episode_rewards.append(running_reward)
 
-#    if i % 100 == 0 or i == num_episodes - 1:
-#        torch.save(policy_net.state_dict(), "./checkpoints/{ep:05d}_policy.chkpt".format(ep = i))
-#        torch.save(target_net.state_dict(), "./checkpoints/{ep:05d}_target.chkpt".format(ep = i))
-##        torch.save(memory, "memory.chkpt")
-#        with open("memory.pkl", "wb") as file:
-#            pickle.dump(memory, file)
+    if i % 100 == 0 or i == num_episodes - 1:
+        torch.save(policy_net.state_dict(), "./checkpoints/{ep:05d}_policy.chkpt".format(ep = i))
+        torch.save(target_net.state_dict(), "./checkpoints/{ep:05d}_target.chkpt".format(ep = i))
+        with open("memory.pkl", "wb") as file:
+            pickle.dump(memory, file)
 
     print(f"Episode {i:5d} ended, reward: {running_reward}")
     i += 1
-#    i += 1
 
-#print("Complete")
-#plt.plot(range(num_episodes), episode_rewards)
-#plt.xlabel("Episode Number")
-#plt.ylabel("Episode Reward")
-#plt.title("RL Reward Across Training Episodes")
-#plt.savefig("./episode_reward_plot.png")
-#print(f"Average reward: {sum(episode_rewards) / len(episode_rewards)}")
-#print(f"Max reward during Episode {episode_rewards.index(max(episode_rewards))}: {max(episode_rewards)}")
-#
-#with open("replay_buffer.pkl", "wb") as file:
-#    pickle.dump(memory, file)
+print("Complete")
+plt.plot(range(num_episodes), episode_rewards)
+plt.xlabel("Episode Number")
+plt.ylabel("Episode Reward")
+plt.title("RL Reward Across Training Episodes")
+plt.savefig("./episode_reward_plot.png")
+print(f"Average reward: {sum(episode_rewards) / len(episode_rewards)}")
+print(f"Max reward during Episode {episode_rewards.index(max(episode_rewards))}: {max(episode_rewards)}")
+
+with open("replay_buffer.pkl", "wb") as file:
+    pickle.dump(memory, file)
