@@ -16,3 +16,4 @@ sed -i "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/envs/__init__.py
 
 mv ./gym-env/gym_env "$MOD_NAME"
 mv ./gym-env "$NEW_NAME"
+pip install -e "./$NEW_NAME"
