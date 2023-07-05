@@ -1,0 +1,13 @@
+# Ignore everything
+*
+# Even ignore files in sub-directories
+!*/
+
+# Include specific files and directories
+!.gitignore
+!DQN_DogFight.py
+!gym-env/setup.py
+!gym-env/README.md
+!gym-env/gym_env/__init__.py
+!gym-env/gym_env/envs/__init__.py
+!gym-env/gym_env/envs/DogFight.py

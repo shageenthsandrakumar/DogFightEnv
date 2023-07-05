@@ -14,9 +14,6 @@ from itertools import count
 from torch import nn, optim
 from torchrl.data import ReplayBuffer, ListStorage
 
-#random.seed(8183838)
-#np.random.seed(834771)
-
 # Define gym environment
 env = gym.make("gym_env/DogFight", render_mode = "human")
 
@@ -62,13 +59,13 @@ class DQN(nn.Module):
 # Hyper-parameters for RL training
 BATCH_SIZE = 384
 GAMMA = 0.99
-LR = 0.85e-4
+LR = 1e-4
 # Eps-greedy algorithm parameters
 EPS_START = 1.00
 EPS_END = 0.03
-EPS_DECAY = 700
+EPS_DECAY = 400
 # Update rate of target network
-TAU = 0.0025
+TAU = 0.005
 
 # Get possible # of actions from the environment
 n_actions = env.action_space.n
@@ -87,8 +84,8 @@ n_observations = len(state)
 policy_net = DQN(n_observations, n_actions).to(device)
 target_net = DQN(n_observations, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
-#policy_net.load_state_dict(torch.load("./checkpoints/04499_policy.chkpt"))
-#target_net.load_state_dict(torch.load("./checkpoints/04499_target.chkpt"))
+#policy_net.load_state_dict(torch.load("./checkpoints/02499_policy.chkpt"))
+#target_net.load_state_dict(torch.load("./checkpoints/02499_target.chkpt"))
 #policy_net.eval()
 #target_net.eval()
 
@@ -96,7 +93,7 @@ target_net.load_state_dict(policy_net.state_dict())
 optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad = True)
 # Set replay memory capacity to first 30 sec of experiences
 # over the last 1000 episodes
-memory = ReplayMemory(200 * 45 * env.metadata["render_fps"])
+memory = ReplayMemory(350 * 45 * env.metadata["render_fps"])
 
 # Steps done for eps-greedy algorithm
 # As steps grow, make it less likely to choose actions randomly
@@ -145,7 +142,7 @@ def optimize_model():
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
 
-num_episodes = 4500
+num_episodes = 2500
 episode_rewards = []
 # Train for the desired # of episodes
 i = 0
@@ -256,6 +253,5 @@ plt.title("RL Reward Across Training Episodes")
 plt.savefig("./episode_reward_plot.png")
 print(f"Average reward: {sum(episode_rewards) / len(episode_rewards)}")
 print(f"Max reward during Episode {episode_rewards.index(max(episode_rewards))}: {max(episode_rewards)}")
-
 with open("replay_buffer.pkl", "wb") as file:
     pickle.dump(memory, file)
