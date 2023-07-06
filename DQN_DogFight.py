@@ -15,7 +15,7 @@ from torch import nn, optim
 from torchrl.data import ReplayBuffer, ListStorage
 
 # Define gym environment
-env = gym.make("gym_env/DogFight", render_mode = "human")
+env = gym.make("gym_env/DogFight")
 
 device = torch.device("cpu")
 
@@ -57,13 +57,13 @@ class DQN(nn.Module):
         return self.layer4(x)
 
 # Hyper-parameters for RL training
-BATCH_SIZE = 384
+BATCH_SIZE = 256
 GAMMA = 0.99
 LR = 1e-4
 # Eps-greedy algorithm parameters
 EPS_START = 1.00
 EPS_END = 0.03
-EPS_DECAY = 400
+EPS_DECAY = 120
 # Update rate of target network
 TAU = 0.005
 
@@ -84,8 +84,8 @@ n_observations = len(state)
 policy_net = DQN(n_observations, n_actions).to(device)
 target_net = DQN(n_observations, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
-#policy_net.load_state_dict(torch.load("./checkpoints/02499_policy.chkpt"))
-#target_net.load_state_dict(torch.load("./checkpoints/02499_target.chkpt"))
+#policy_net.load_state_dict(torch.load("./checkpoints/01249_policy.chkpt"))
+#target_net.load_state_dict(torch.load("./checkpoints/01249_target.chkpt"))
 #policy_net.eval()
 #target_net.eval()
 
@@ -134,15 +134,14 @@ def optimize_model():
         next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0]
 
     expected_state_action_values = (next_state_values * GAMMA) + reward_batch
-#    criterion = nn.MSELoss()
-    criterion = nn.SmoothL1Loss()
-    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
+    criterion = nn.MSELoss()
+    loss = criterion(state_action_values.float(), expected_state_action_values.unsqueeze(1).float())
     optimizer.zero_grad()
     loss.backward()
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
     optimizer.step()
 
-num_episodes = 2500
+num_episodes = 1250
 episode_rewards = []
 # Train for the desired # of episodes
 i = 0
@@ -208,7 +207,6 @@ while i < num_episodes:
                         shooting_transitions[y][2],
                         torch.tensor([new_reward], device = device)
                     )
-#                    print(f"Reward for shooting missile {hit_missile_id}: {shooting_flags[x]['hit_rewards'][idx]}")
                 y -= 1
         for idx, miss_missile_id in reversed(list(enumerate(shooting_flags[x]["miss_ids"]))):
             y = x - 1

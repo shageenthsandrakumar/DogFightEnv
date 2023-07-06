@@ -70,22 +70,22 @@ class DogFightEnv(gym.Env):
         self.player_max_turn_rate = np.pi / 2.0
         # Player observation radius is 1/4 the width of the game area
         self.player_observation_range = 0.25 * self.max_x
+        self.player_last_dist = None
 
         # Player missile properties
         # Track the missiles for properly assigning delayed rewards outside env
         self.player_missile_id_counter = 0
         self.player_missile_radius = 3
-        self.player_missile_speed = 1.75 * self.player_max_speed
+        self.player_missile_speed = 2.0 * self.player_max_speed
         self.player_missile_range = 3 * self.player_observation_range
         # Bounds of player missile's random angle offset
         self.player_missile_angle_offset = 0.04
 
         # Enemy properties
         self.enemy_radius = 10
-        # Enemy min speed: 10 seconds to cross game area
-        # Enemy max speed:  5 seconds to cross game area
-        self.enemy_min_speed = self.max_x / 10
-        self.enemy_max_speed = self.max_x /  5
+        # Enemy is 0.75 x player speed
+        self.enemy_min_speed = 0.75 * self.player_min_speed
+        self.enemy_max_speed = 0.75 * self.player_max_speed
         # Enemy min acceleration: 0.25 seconds from max to min speed
         # Enemy max acceleration: 2.50 seconds from min to max speed
         self.enemy_min_acceleration = (
@@ -127,27 +127,25 @@ class DogFightEnv(gym.Env):
         self.target_opening_range = 0.50 * self.player_missile_range
 
         # Reward definitions
-        self.reward_missile_miss = 0
+        self.reward_missile_miss = -self.tau
         self.reward_missile_hit_enemy = 50
         self.reward_missile_hit_target = 100
         self.reward_player_collides_with_enemy = -500
         self.reward_player_leaves_game = -100
-        self.reward_time_penalty = self.tau
+        self.reward_time_penalty = -self.tau
         self.reward_approach_target = abs(self.reward_time_penalty)
 
         # Environment observation space:
         #  0.) Jet absolute x position
         #  1.) Jet absolute y position
-        #  2.) Jet absolute angle
-        #  3.) Target absolute x position
-        #  4.) Target absolute y position
-        #  5.) Target angle to player
-        #  6.) Enemy absolute x position
-        #  7.) Enemy absolute y position
-        #  8.) Enemy angle to player
+        #  2.) Target absolute x position
+        #  3.) Target absolute y position
+        #  4.) Target distance from player
+        #  5.) Enemy absolute x position
+        #  6.) Enemy absolute y position
+        #  7.) Enemy distance from player
         self.observation_space = gym.spaces.Box(
             low = np.array([
-                np.finfo(np.float64).min,
                 np.finfo(np.float64).min,
                 np.finfo(np.float64).min,
                 np.finfo(np.float64).min,
@@ -166,18 +164,18 @@ class DogFightEnv(gym.Env):
                 np.finfo(np.float64).max,
                 np.finfo(np.float64).max,
                 np.finfo(np.float64).max,
-                np.finfo(np.float64).max,
             ]),
             dtype = np.float64
         )
 
         # Environment action space:
-        # 0.) Do nothing (NO-OP)
-        # 1.) Fire missile at target
-        # 2.) Fire missile at enemy
-        # 3.) Turn left
-        # 4.) Turn right
-        self.action_space = gym.spaces.Discrete(5)
+        # 0.) Forward
+        # 1.) Backward
+        # 2.) Left
+        # 3.) Right
+        # 4.) Shoot target
+        # 5.) Shoot enemy
+        self.action_space = gym.spaces.Discrete(6)
 
     # Take a single simulation step in the environment
     def step(self, action):
@@ -191,53 +189,31 @@ class DogFightEnv(gym.Env):
             "miss_rewards" : [],   # rewards (penalties) for the missiles that missed
         }
 
-        # Handle the player actions
-        player_turn_direction = self.STRAIGHT
-        # The player shoots at the target or the enemy
-        if action == 1:
-            # Track if the missile was fired within the target's opening range
-            if self.target.distance_to(self.player) < self.target_opening_range:
+        if action == 4 or action == 5:
+            if self.target.distance_to(self.player) <= self.target_opening_range:
                 fired_in_zone = True
             else:
                 fired_in_zone = False
+            if action == 4:
+                angle = self.player.angle_to(self.target)
+            elif self.enemy is not None and self.player.distance_to(self.enemy) <= self.player.observation_range:
+                angle = self.player.angle_to(self.enemy)
+            else:
+                angle = 0
             new_missile = Missile(
                 self.player.x,
                 self.player.y,
-                speed = self.player_missile_speed,
-                angle = self.player.angle + self.player.angle_to(self.target),
-                radius = self.player_missile_radius,
-                range = self.player_missile_range,
+                self.player_missile_speed,
+                self.player.angle + angle,
+                self.player_missile_radius,
+                self.player_missile_range,
                 id = self.player_missile_id_counter,
                 fired_in_zone = fired_in_zone
             )
+            self.player.angle = new_missile.angle
             self.player.missiles.append(new_missile)
             player_missile_step_info["shoot_id"] = self.player_missile_id_counter
             self.player_missile_id_counter += 1
-        # The player shoots at the enemy
-        elif action == 2:
-            # Only shoot a missile at the enemy if it is actually visible to the player
-            if self.enemy is not None and self.player.distance_to(self.enemy) <= self.player_observation_range:
-                # Lead the player missile's shot towards the enemy (Predict 0.25 sec ahead)
-                pos = (
-                    self.enemy.x + 0.25 * self.enemy.speed * np.cos(self.enemy.angle),
-                    self.enemy.y + 0.25 * self.enemy.speed * np.sin(self.enemy.angle)
-                )
-                new_missile = Missile(
-                    self.player.x,
-                    self.player.y,
-                    speed = self.player_missile_speed,
-                    angle = self.player.angle + self.player.angle_to(pos),
-                    radius = self.player_missile_radius,
-                    range = self.player_missile_range,
-                    id = self.player_missile_id_counter
-                )
-                self.player.missiles.append(new_missile)
-                player_missile_step_info["shoot_id"] = self.player_missile_id_counter
-                self.player_missile_id_counter += 1
-        # The player turns left or right
-        elif action == 3 or action == 4:
-            player_turn_direction = [self.LEFT, self.RIGHT][action - 3]
-
         # Handle the enemy actions (if it is still alive)
         if self.enemy is not None:
             enemy_turn_direction = self.STRAIGHT
@@ -269,7 +245,8 @@ class DogFightEnv(gym.Env):
                 )
 
         # Move the player
-        self.player.move(self.tau, move_direction = player_turn_direction)
+        if not action == 4:
+            self.player.move(self.tau, action)
         # Move the enemy
         if self.enemy is not None:
             self.enemy.move(self.tau, turn_direction = enemy_turn_direction)
@@ -314,9 +291,16 @@ class DogFightEnv(gym.Env):
         if self.enemy is not None and self.enemy.collides_with(self.player):
             reward += self.reward_player_collides_with_enemy
             terminated = True
+        elif not self.player.in_area(*(self.world_area)):
+            reward += self.reward_player_leaves_game
+            terminated = True
         else:
             # Constant negative reward to encourage the agent to finish sooner
             reward += self.reward_time_penalty
+            dist_to_target = self.player.distance_to(self.target)
+            if dist_to_target < self.player_last_dist:
+                reward += self.reward_approach_target
+            self.player_last_dist = dist_to_target
             # No collision occurred, but check if the player gets too close to enemy
             if self.enemy is not None:
                 distance_to_player = self.enemy.distance_to(self.player)
@@ -332,32 +316,29 @@ class DogFightEnv(gym.Env):
         # Prepare to return the observations in a normalized manner
         px_norm = self.player.x / self.max_x
         py_norm = self.player.y / self.max_y
-        pa_norm = self.player.angle / np.pi
-        if (
-            self.enemy is None or
-            (self.player.distance_to(self.enemy) > self.player.observation_range)
-        ):
+        tx_norm = self.target.x / self.max_x
+        ty_norm = self.target.y / self.max_y
+        max_d = np.sqrt(self.max_x**2 + self.max_y**2)
+        td_norm = self.player.distance_to(self.target) / max_d
+        if self.enemy is None:
             ex_norm = -1.
             ey_norm = -1.
-            ea_norm = -1.
+            ed_norm = -1.
         else:
             ex_norm = self.enemy.x / self.max_x
             ey_norm = self.enemy.y / self.max_y
-            ea_norm = self.enemy.angle_to(self.player) / (2 * np.pi)
-        tx_norm = self.target.x / self.max_x
-        ty_norm = self.target.y / self.max_y
-        ta_norm = self.target.angle_to(self.player) / (2 * np.pi)
+            ed_norm = self.player.distance_to(self.enemy) / max_d
+            
 
         self.state = (
             px_norm,
             py_norm,
-            pa_norm,
-            ex_norm,
-            ey_norm,
-            ea_norm,
             tx_norm,
             ty_norm,
-            ta_norm,
+            td_norm,
+            ex_norm,
+            ey_norm,
+            ed_norm
         )
 
         # Check if we reached the maximum episode time limit and terminate if so
@@ -416,23 +397,25 @@ class DogFightEnv(gym.Env):
         )
 
         # Normalized initial state observation preparation
-        tx_trans = self.target.x - self.player.x
-        ty_trans = self.target.y - self.player.y
-        tx_p = tx_trans * np.cos(self.player.angle) - ty_trans * np.sin(self.player.angle)
-        ty_p = tx_trans * np.sin(self.player.angle) + ty_trans * np.cos(self.player.angle)
-        tx_norm = tx_p / self.max_x
-        ty_norm = ty_p / self.max_y
+        px_norm = self.player.x / self.max_x
+        py_norm = self.player.y / self.max_y
+        tx_norm = self.target.x / self.max_x
+        ty_norm = self.target.y / self.max_y
+        max_d = np.sqrt(self.max_x**2 + self.max_y**2)
+        td_norm = self.player.distance_to(self.target) / max_d
+
         self.state = (
-            self.player.x / self.max_x,
-            self.player.y / self.max_y,
-            self.player.angle / np.pi,
+            px_norm,
+            py_norm,
+            tx_norm,
+            ty_norm,
+            td_norm,
             -1.,
             -1.,
-            -1.,
-            self.target.x / self.max_x,
-            self.target.y / self.max_y,
-            self.target.angle_to(self.player) / (2 * np.pi),
+            -1.
         )
+
+        self.player_last_dist = self.player.distance_to(self.target)
 
         if self.render_mode == "human":
             self.render()
@@ -784,16 +767,15 @@ class Player(Jet):
         )
         self.missiles = []
 
-    def move(self, tau, move_direction):
-        if move_direction == -1:
-            self.angle -= 0.5 * np.pi
-        elif move_direction == 1:
-            self.angle += 0.5 * np.pi
-        self.angle = np.arctan2(np.sin(self.angle), np.cos(self.angle))
-
-        # Update position
-        self.x += self.speed * np.cos(self.angle) * tau
-        self.y += self.speed * np.sin(self.angle) * tau
+    def move(self, tau, action):
+        if action == 1:
+            self.y += self.speed * tau
+        elif action == 2:
+            self.y -= self.speed * tau
+        elif action == 3:
+            self.x -= self.speed * tau
+        else:
+            self.x += self.speed * tau
 
 # Enemies have a single missile
 class Enemy(Entity):
