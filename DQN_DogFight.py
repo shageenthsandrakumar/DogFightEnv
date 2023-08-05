@@ -8,28 +8,18 @@ import torch
 import numpy as np
 import pandas as pd
 
-import gym_env_AlexNet
+from torch import Tensor
+from typing import Type
+import gym_env_ResNet
+from torch import nn, optim
 
 from collections import deque, namedtuple
 from itertools import count
 from tensordict import TensorDict
-from torch import nn, optim
 from torchrl.data import TensorDictPrioritizedReplayBuffer, LazyMemmapStorage
 from torchvision import transforms as T
 import torch.nn.functional as F
-from PIL import Image
-import torch
-torch.cuda.empty_cache()
-
-
-
-save_image = False
-
-Running_Mode = False
-
-	
-
-
+import torch.nn as nn
 
 # Custom wrappers
 
@@ -45,9 +35,7 @@ class SkipFrame(gym.Wrapper):
         for i in range(self._skip):
             # Accumulate reward and repeat the same action
             obs, reward, done, trunk, info = self.env.step(action)
-            #lets look at the obs, reward, done, trunk and info
             total_reward += reward
-            #We take the total
             if done:
                 break
         return obs, total_reward, done, trunk, info
@@ -91,80 +79,210 @@ class ResizeObservation(gym.ObservationWrapper):
         return observation
 
 # Define gym environment and apply wrappers
-render__mode = None
-if Running_Mode:
-	render__mode = "human"
-
-env = gym.make("gym_env_AlexNet/DogFight", render_mode = render__mode)
+env = gym.make("gym_env_ResNet/DogFight")
 env = SkipFrame(env, skip = 1)
 env = GrayScaleObservation(env)
-env = ResizeObservation(env, shape = 400)
+env = ResizeObservation(env, shape = 100)
 env = gym.wrappers.FrameStack(env, num_stack = 4, lz4_compress = False)
 
+#env = gym.wrappers.FrameStack(env, 4, lz4_compress = True)
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-data_min = 0
-data_max = 255
-def normalize(data):
-    return (data-data_min)/(data_max-data_min)
-    
-def imshow(img):
-    npimg = img.cpu().numpy()
-    return npimg
-    
-
-
-
-
-
-
+device = torch.device( 'cpu')
 
 episodes_done = 0
 
 # Set up DQN network, layer-by-layer
+
+class BasicBlock(nn.Module):
+    """
+    Builds the Basic Block of the ResNet model.
+    For ResNet18 and ResNet34, these are stackings od 3x3=>3x3 convolutional
+    layers.
+    For ResNet50 and above, these are stackings of 1x1=>3x3=>1x1 (BottleNeck) 
+    layers.
+    """
+    def __init__(
+        self, 
+        num_layers: int,
+        in_channels: int,
+        out_channels: int,
+        stride: int = 1,
+        expansion: int = 1,
+        downsample: nn.Module = None
+    ) -> None:
+        super(BasicBlock, self).__init__()
+        self.num_layers = num_layers
+        # Multiplicative factor for the subsequent conv2d layer's output 
+        # channels.
+        # It is 1 for ResNet18 and ResNet34, and 4 for the others.
+        self.expansion = expansion
+        self.downsample = downsample
+        # 1x1 convolution for ResNet50 and above.
+        if num_layers > 34:
+            self.conv0 = nn.Conv2d(
+                in_channels, 
+                out_channels, 
+                kernel_size=1, 
+                stride=1,
+                bias=False
+            )
+            self.bn0 = nn.BatchNorm2d(out_channels)
+            in_channels = out_channels
+        # Common 3x3 convolution for all.
+        self.conv1 = nn.Conv2d(
+            in_channels, 
+            out_channels, 
+            kernel_size=3, 
+            stride=stride, 
+            padding=1,
+            bias=False
+        )
+        self.bn1 = nn.BatchNorm2d(out_channels)
+        # 1x1 convolution for ResNet50 and above.
+        if num_layers > 34:
+            self.conv2 = nn.Conv2d(
+                out_channels, 
+                out_channels*self.expansion, 
+                kernel_size=1, 
+                stride=1,
+                bias=False
+            )
+            self.bn2 = nn.BatchNorm2d(out_channels*self.expansion)
+        else:
+            # 3x3 convolution for ResNet18 and ResNet34 and above.
+            self.conv2 = nn.Conv2d(
+                out_channels, 
+                out_channels*self.expansion, 
+                kernel_size=3, 
+                padding=1,
+                bias=False
+            )
+            self.bn2 = nn.BatchNorm2d(out_channels*self.expansion)
+        self.relu = nn.ReLU(inplace=True)
+    def forward(self, x: Tensor) -> Tensor:
+        identity = x
+    
+        # Through 1x1 convolution if ResNet50 or above.
+        if self.num_layers > 34:
+            out = self.conv0(x)
+            out = self.bn0(out)
+            out = self.relu(out)
+        # Use the above output if ResNet50 and above.
+        if self.num_layers > 34:
+            out = self.conv1(out)
+        # Else use the input to the `forward` method.
+        else:
+            out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        if self.downsample is not None:
+            identity = self.downsample(x)
+        out += identity
+        out = self.relu(out)
+        return  out
+
+
 class DQN(nn.Module):
-    def __init__(self, n_state_dim, n_actions):
+    def __init__(self, n_state_dim,num_layers, block, n_actions):
         super().__init__()
         c, w, h = n_state_dim
-        self.features = nn.Sequential(
-            nn.Conv2d(c, 64, kernel_size=11, stride=4, padding=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.Conv2d(64, 192, kernel_size=5, padding=2),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-            nn.Conv2d(192, 384, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(384, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=3, stride=2),
-        )
+        if num_layers == 18:
+            # The following `layers` list defines the number of `BasicBlock` 
+            # to use to build the network and how many basic blocks to stack
+            # together.
+            layers = [2, 2, 2, 2]
+            self.expansion = 1
+        if num_layers == 34:
+            layers = [3, 4, 6, 3]
+            self.expansion = 1
+        if num_layers == 50:
+            layers = [3, 4, 6, 3]
+            self.expansion = 4
+        if num_layers == 101:
+            layers = [3, 4, 23, 3]
+            self.expansion = 4
+        if num_layers == 152:
+            layers = [3, 8, 36, 3]
+            self.expansion = 4
+        
+        self.in_channels = 64
+        # All ResNets (18 to 152) contain a Conv2d => BN => ReLU for the first
+        # three layers. Here, kernel size is 7.
+        self.conv1 = nn.Conv2d(
+            in_channels=c,
+            out_channels=self.in_channels,
+            kernel_size=7, 
+            stride=2,
+            padding=3,
+            bias=False)
+        self.bn1 = nn.BatchNorm2d(self.in_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.layer1 = self._make_layer(block, 64, layers[0], num_layers=num_layers)
+        self.layer2 = self._make_layer(block, 128, layers[1], stride=2, num_layers=num_layers)
+        self.layer3 = self._make_layer(block, 256, layers[2], stride=2, num_layers=num_layers)
+        self.layer4 = self._make_layer(block, 512, layers[3], stride=2, num_layers=num_layers)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512*self.expansion, n_actions)
 
-        self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
-        self.classifier = nn.Sequential(
-            nn.Dropout(),
-            nn.Linear(256 * 6 * 6, 4096),
-            nn.ReLU(inplace=True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(inplace=True),
-            nn.Linear(4096, n_actions),
-        )
 
-    def _forward_conv(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        return x
+    def _make_layer(self, block: Type[BasicBlock],out_channels: int,blocks: int,stride: int = 1,num_layers: int = 18):
+        downsample = None
+        if stride != 1 or self.in_channels != out_channels * self.expansion:
+            """
+            This should pass from `layer2` to `layer4` or 
+            when building ResNets50 and above. Section 3.3 of the paper
+            Deep Residual Learning for Image Recognition
+            (https://arxiv.org/pdf/1512.03385v1.pdf).
+            """
+            downsample = nn.Sequential(
+                nn.Conv2d(
+                    self.in_channels, 
+                    out_channels*self.expansion,
+                    kernel_size=1,
+                    stride=stride,
+                    bias=False 
+                ),
+                nn.BatchNorm2d(out_channels * self.expansion),
+            )
+        layers = []
+        layers.append(
+            block(
+                num_layers, 
+                self.in_channels, 
+                out_channels, 
+                stride, 
+                self.expansion, 
+                downsample
+            )
+        )
+        self.in_channels = out_channels * self.expansion
+        for i in range(1, blocks):
+            layers.append(block(
+                num_layers,
+                self.in_channels,
+                out_channels,
+                expansion=self.expansion
+            ))
+        return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = self.features(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        # The spatial dimension of the final layer's feature 
+        # map should be (7, 7) for all ResNets.
         x = self.avgpool(x)
         x = torch.flatten(x, 1)
-        x = self.classifier(x)
+        x = self.fc(x)
+
         return x
 
 
@@ -174,7 +292,7 @@ GAMMA = 0.99
 LR = 2.5e-4
 # Eps-greedy algorithm parameters
 EPS_START = 1.00
-EPS_END = 0.1
+EPS_END = 0.3
 EPS_DECAY = 3000
 # Update rate of target network
 TAU = 0.0025
@@ -187,14 +305,24 @@ print(f"State shape: {state.shape}")
 # Get the # of observations of the state (size of input layer)
 n_observations = len(state)
 
-policy_net = DQN(state.shape, n_actions).to(device)
-target_net = DQN(state.shape, n_actions).to(device)
+# Set up policy & target network w/ proper input and output layer sizes
+# Learning target constantly shifts as parameters of the DQN are updated.
+# This is a problem since it can cause the learning to diverge.
+# Separate target network is used to calc. target Q-value.
+# Target has same structure as policy NN, but parameters are frozen.
+# Target network updated only occasionally to prevent prevent extreme
+# divergence or the agent "forgetting" how to act properly.
+#policy_net = DQN(n_observations, n_actions).to(device)
+#target_net = DQN(n_observations, n_actions).to(device)
+policy_net = DQN(state.shape, 18, BasicBlock, n_actions).to(device)
+target_net = DQN(state.shape, 18, BasicBlock, n_actions).to(device)
 target_net.load_state_dict(policy_net.state_dict())
-if Running_Mode:
-	policy_net.load_state_dict(torch.load("./checkpoints/09999_policy.chkpt"))
-	target_net.load_state_dict(torch.load("./checkpoints/09999_policy.chkpt"))
-	policy_net.eval()
-	target_net.eval()
+for p in target_net.parameters():
+    p.requires_grad = False
+#policy_net.load_state_dict(torch.load("./checkpoints3/09999_policy.chkpt"))
+#target_net.load_state_dict(torch.load("./checkpoints3/09999_policy.chkpt"))
+#policy_net.eval()
+#target_net.eval()
 
 # AdamW optimizer w/ parameters set
 optimizer = optim.AdamW(policy_net.parameters(), lr = LR, amsgrad = True)
@@ -209,12 +337,13 @@ memory = TensorDictPrioritizedReplayBuffer(
     batch_size = BATCH_SIZE,
     pin_memory = False
 )
+#memory.load_state_dict(torch.load("./checkpoints/00999_memory.chkpt"))
 
+# Steps done for eps-greedy algorithm
+# As steps grow, make it less likely to choose actions randomly
 def select_action(state):
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * episodes_done / EPS_DECAY)
-    if Running_Mode:
-    	eps_threshold = 0
     if eps_threshold < sample:
         with torch.no_grad():
             return policy_net(state.unsqueeze(0)).max(1)[1].view(1, 1)
@@ -222,10 +351,10 @@ def select_action(state):
     else:
         return torch.tensor([[env.action_space.sample()]], device = device, dtype = torch.long)
 
-
+# Track the durations through the episodes of cartpole, high is better (basically track performance for this environment)
 episode_durations = []
 
-
+# Optimization
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
@@ -235,10 +364,9 @@ def optimize_model():
     actions = actions.squeeze()
     rewards = rewards.squeeze()
     terminations = terminations.squeeze()
-  
+    #print(f"Shapes: {states.shape}, {actions.shape}, {next_states.shape}, {rewards.shape}, {terminations.shape}")
     state_action_values = policy_net(states).gather(1, actions.unsqueeze(1))
-    
-    
+#    state_action_values = policy_net(states).gather(1, actions)
 
     with torch.no_grad():
         next_state_values = target_net(next_states).max(1)[0]
@@ -252,7 +380,6 @@ def optimize_model():
     loss = (weights * td_errors).mean()
     
     optimizer.zero_grad()
-    
     loss.backward()
     torch.nn.utils.clip_grad_value_(policy_net.parameters(), 1)
     optimizer.step()
@@ -262,22 +389,15 @@ def optimize_model():
 
 num_episodes = 10000
 episode_rewards = []
-
+# Train for the desired # of episodes
 i = 0
 for i in range(num_episodes):
     ep_step_count = 0
     # Get initial state of episode
     state, info = env.reset()
-    imnum = 0
-    for I in imshow(torch.from_numpy(np.array(state))):
-    	imnum += 1
-    	I8 = (((I - I.min()) / (I.max() - I.min())) * 255.9).astype(np.uint8)
-    	img = Image.fromarray(I8)
-    	if save_image:
-    		img.save(f"./images/Episode:{i}:0:{imnum}.png")
-
-    state = torch.from_numpy(normalize(np.array(state))).to(device)
-
+#    state = np.array(state)
+    state = torch.from_numpy(np.array(state)).to(device)
+#    state = torch.tensor(state, dtype = torch.float32, device = device).unsqueeze(0)
     running_reward = 0
     # Continue until termination
     for t in count():
@@ -292,16 +412,8 @@ for i in range(num_episodes):
 
         if done:
             break
-            
-        imnum = 0    
-        #plt.imsave(f"./images/Episode:{i}:{t}.png", imshow(torch.from_numpy(np.array(next_state))).copy(order='C'))
-        for I in imshow(torch.from_numpy(np.array(next_state))):
-        	imnum += 1
-        	I8 = (((I - I.min()) / (I.max() - I.min())) * 255.9).astype(np.uint8)
-        	img = Image.fromarray(I8)
-        	if save_image:
-        		img.save(f"./images/Episode:{i}:{t}:{imnum}.png")
-        next_state = torch.from_numpy(normalize(np.array(next_state))).to(device)
+
+        next_state = torch.from_numpy(np.array(next_state)).to(device)
         state = next_state
 
         terminated = torch.tensor([terminated], dtype = torch.bool, device = device)
@@ -324,6 +436,7 @@ for i in range(num_episodes):
     if (i + 1) % 100 == 0 or (i + 1) == num_episodes:
         torch.save(policy_net.state_dict(), f"./checkpoints/{i:05d}_policy.chkpt")
         torch.save(target_net.state_dict(), f"./checkpoints/{i:05d}_target.chkpt")
+        #torch.save(memory.state_dict(), f"./checkpoints/{i:05d}_memory.chkpt")
 
     print(f"Episode {i:5d} ended, reward: {running_reward}")
 
