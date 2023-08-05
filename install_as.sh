@@ -14,12 +14,10 @@ if [ "$(uname)" == "Darwin" ]; then
     sed -i '' "s/gym_env/$MOD_NAME/g" ./gym-env/setup.py
     sed -i '' "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/__init__.py
     sed -i '' "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/envs/__init__.py
-    sed -i '' "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/envs/__init__.py
 else
     sed -i "s/gym_env/$MOD_NAME/g" DQN_DogFight.py
     sed -i "s/gym_env/$MOD_NAME/g" ./gym-env/setup.py
     sed -i "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/__init__.py
-    sed -i "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/envs/__init__.py
     sed -i "s/gym_env/$MOD_NAME/g" ./gym-env/gym_env/envs/__init__.py
 fi
 
