@@ -170,10 +170,15 @@ class DQN(nn.Module):
             nn.MaxPool2d(kernel_size=3, stride=2),
 	    #We then take Maxpool2d keneral size of 3 and stride of 2	
             nn.Conv2d(192, 384, kernel_size=3, padding=1),
+	    #We then apply a 2d convolution by applying a kernel size of 3 and a padding of 1
             nn.ReLU(inplace=True),
+	    #We then apply another RELU filter 	
             nn.Conv2d(384, 256, kernel_size=3, padding=1),
+	    #We then apply a 2d convolution	
             nn.ReLU(inplace=True),
+	    #We then apply ReLU	on a convolutional 2d filter 
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
+	    #We then 
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
         )
