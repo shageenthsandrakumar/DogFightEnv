@@ -19,25 +19,29 @@ from torchvision import transforms as T
 import torch.nn.functional as F
 from PIL import Image
 import torch
+
 torch.cuda.empty_cache()
+#This has been added in order to empty the cache
 
 
 
 save_image = False
+#Save Image is a flag added in order to determine whether the program needs to save an image. 
 
 Running_Mode = False
-
-	
-
-
+#Running_Mode is a flad added in order to detemine whether the program needs to run an image. 
 
 # Custom wrappers
 
 class SkipFrame(gym.Wrapper):
+#Skipframe(gym.Wrapper) class	
     def __init__(self, env, skip):
+	    #Intialize envrionment 
         """Return only every `skip`-th frame"""
         super().__init__(env)
+	#Try to connect to a higher class    
         self._skip = skip
+	#Skip the appropriate frames    
 
     def step(self, action):
         """Repeat action, and sum reward"""
@@ -56,19 +60,26 @@ class SkipFrame(gym.Wrapper):
 class GrayScaleObservation(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
+	#we are trying to combine it with the GrayScaleObservation class    
         obs_shape = self.observation_space.shape[:2]
+	#We are taking the observative_space.shape[:2]    
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
-
+	#We are putting everything into gym.spaces.box()
     def permute_orientation(self, observation):
-
+	
         observation = np.transpose(observation, (2, 0, 1))
+	#We are taking an observation vector and transposing it by (2,0,1)    
         observation = torch.tensor(observation.copy(), dtype=torch.float)
+	# We are taking an observation vector copying it and putting in a torch.tensor
         return observation
 
     def observation(self, observation):
         observation = self.permute_orientation(observation)
+	#we are permuting the orientation of the observation
         transform = T.Grayscale()
+	#We are transforming the T vector and applying Grayscale onto it
         observation = transform(observation)
+	#We are taking the observation then transforming it. 
         return observation
 
 
@@ -96,22 +107,38 @@ if Running_Mode:
 	render__mode = "human"
 
 env = gym.make("gym_env_AlexNet/DogFight", render_mode = render__mode)
+#We are making the AlexNet DogFight code 
 env = SkipFrame(env, skip = 1)
+# We are skipping a single frame
 env = GrayScaleObservation(env)
+#We are converting the observation space into GrayScale 
 env = ResizeObservation(env, shape = 400)
+#We are resizing the observation shape
 env = gym.wrappers.FrameStack(env, num_stack = 4, lz4_compress = False)
+#We are applying FrameStack to the env, num_stack and lz4_compress
+
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#Use cuda.is_available() else use the 'cpu'
+
 
 data_min = 0
+#Take the minimium data
 data_max = 255
+#Take the maximium data point
+
+
 def normalize(data):
     return (data-data_min)/(data_max-data_min)
+    #We are normalizing the data by substracting the minimium and then dividing by the range of the data. 
+    
     
 def imshow(img):
     npimg = img.cpu().numpy()
+    #Img.cpu().numpy()
     return npimg
+    
     
 
 
@@ -127,13 +154,21 @@ class DQN(nn.Module):
     def __init__(self, n_state_dim, n_actions):
         super().__init__()
         c, w, h = n_state_dim
+	#C,W,H is state_dim    
         self.features = nn.Sequential(
+	    	
             nn.Conv2d(c, 64, kernel_size=11, stride=4, padding=2),
+	    #We are taking the conv2d vector with c channel, 64, kernel_size = 11, stride = 4, and padding is 2
             nn.ReLU(inplace=True),
+	    #The ReLU will just take the output of the conv2d and apply the ReLU filter to it. 
             nn.MaxPool2d(kernel_size=3, stride=2),
+	    #We will take the output of the ReLU and apply a MaxPool2d filter 	
             nn.Conv2d(64, 192, kernel_size=5, padding=2),
+	    #We will take the output of the MaxPool2d filter and apply a 2d convolution	
             nn.ReLU(inplace=True),
+	    #We then apply another RELU filter 
             nn.MaxPool2d(kernel_size=3, stride=2),
+	    #We then take Maxpool2d keneral size of 3 and stride of 2	
             nn.Conv2d(192, 384, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
             nn.Conv2d(384, 256, kernel_size=3, padding=1),
@@ -144,7 +179,9 @@ class DQN(nn.Module):
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
-        self.classifier = nn.Sequential(
+	#Self.avgpool is the adaptive Avg Pool2D (6,6)
+	    
+        self.classifier = nn.Sequential(	
             nn.Dropout(),
             nn.Linear(256 * 6 * 6, 4096),
             nn.ReLU(inplace=True),
