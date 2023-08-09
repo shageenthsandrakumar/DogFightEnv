@@ -152,7 +152,7 @@ def imshow(img):
 episodes_done = 0
 
 # Set up DQN network, layer-by-layer
-#This specific CNN is AlexNet which is a convolutional neural network that is widely used. 
+#This specific CNN is AlexNet which is a convolutional neural network that is widely used. AlexNet is a classic convolutional neural network architecture. It consists of convolutions, max pooling and dense layers as the basic building blocks. Grouped convolutions are used in order to fit the model across two GPUs.
 
 class DQN(nn.Module):
     def __init__(self, n_state_dim, n_actions):
@@ -182,7 +182,7 @@ class DQN(nn.Module):
             nn.ReLU(inplace=True),
 	    #We then apply ReLU	on a convolutional 2d filter 
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
-	    #We then 
+	    #We then apply a 2d convolutio
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=3, stride=2),
         )
