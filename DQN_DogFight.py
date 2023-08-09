@@ -26,10 +26,11 @@ torch.cuda.empty_cache()
 
 
 save_image = False
-#Save Image is a flag added in order to determine whether the program needs to save an image. 
+#Save Image is a flag added in order to determine whether the program needs to save the images before inserting into the Convolutional Neural Network. 
 
 Running_Mode = False
-#Running_Mode is a flad added in order to detemine whether the program needs to run an image. 
+#Running_Mode is a flag added in order to detemine whether the program is finished training and ready to be evaluated. In running mode, we have the weights of the neural network's 9999th checkpoint extracted. We also set the network to always choose the optimal action. We also changed the view to human mode so you can see what the agent is doing. 
+#Usually we set Running mode to be false when we are training the RL algorithm from scratch. This is because there is no checkpoint evaluated. Human rending is off because it would be inefficient to see the agent on screen while training. 
 
 # Custom wrappers
 
@@ -60,7 +61,7 @@ class SkipFrame(gym.Wrapper):
 class GrayScaleObservation(gym.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-	#we are trying to combine it with the GrayScaleObservation class    
+	#we are trying to combine it with the ObservationWrapper class    
         obs_shape = self.observation_space.shape[:2]
 	#We are taking the observative_space.shape[:2]    
         self.observation_space = gym.spaces.Box(low=0, high=255, shape=obs_shape, dtype=np.uint8)
@@ -84,6 +85,7 @@ class GrayScaleObservation(gym.ObservationWrapper):
 
 
 class ResizeObservation(gym.ObservationWrapper):
+	#This class is just used to resize the vector
     def __init__(self, env, shape):
         super().__init__(env)
         if isinstance(shape, int):
@@ -150,11 +152,13 @@ def imshow(img):
 episodes_done = 0
 
 # Set up DQN network, layer-by-layer
+#This specific CNN is AlexNet which is a convolutional neural network that is widely used. 
+
 class DQN(nn.Module):
     def __init__(self, n_state_dim, n_actions):
         super().__init__()
         c, w, h = n_state_dim
-	#C,W,H is state_dim    
+	#C,W,H is state_dimmesnions     
         self.features = nn.Sequential(
 	    	
             nn.Conv2d(c, 64, kernel_size=11, stride=4, padding=2),
