@@ -184,15 +184,20 @@ class DQN(nn.Module):
             nn.Conv2d(256, 256, kernel_size=3, padding=1),
 	    #We then apply a 2d convolutio
             nn.ReLU(inplace=True),
+	    #We then apply a ReLU filter
             nn.MaxPool2d(kernel_size=3, stride=2),
+	    #We then apply a MaxPool2d filter  
         )
 
         self.avgpool = nn.AdaptiveAvgPool2d((6, 6))
 	#Self.avgpool is the adaptive Avg Pool2D (6,6)
 	    
-        self.classifier = nn.Sequential(	
+        self.classifier = nn.Sequential(
+	    #This creates a Sequential Neural Network	
             nn.Dropout(),
+	    #This creates a Dropout 
             nn.Linear(256 * 6 * 6, 4096),
+	
             nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(4096, 4096),
