@@ -197,25 +197,36 @@ class DQN(nn.Module):
             nn.Dropout(),
 	    #This creates a Dropout 
             nn.Linear(256 * 6 * 6, 4096),
-	
+	    #Linear layer from standard AlexNet structure
             nn.ReLU(inplace=True),
+	    #This is a ReLU filter	
             nn.Dropout(),
+	    #This is a dropout	
             nn.Linear(4096, 4096),
+	    #This is a Linear Layer	
             nn.ReLU(inplace=True),
+	    #The is a ReLU function
             nn.Linear(4096, n_actions),
+	    #This is a linear layer with 4096 transactions
         )
 
     def _forward_conv(self, x):
+	#We apply each layer of a convolution function and relu activation function   
         x = F.relu(self.conv1(x))
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         return x
 
     def forward(self, x):
+	#Take the x vector     
         x = self.features(x)
+	#Take the x vector and feed it into the features function
         x = self.avgpool(x)
+	#Take the x vector and feed it to the average pooling function    
         x = torch.flatten(x, 1)
+	#Take the x vector and feed it to the flatten torch function    
         x = self.classifier(x)
+	#Take the x vector and feed it into the classifier function
         return x
 
 
@@ -261,6 +272,8 @@ memory = TensorDictPrioritizedReplayBuffer(
     pin_memory = False
 )
 
+# Steps done for eps-greedy algorithm
+# As steps grow, make it less likely to choose actions randomly
 def select_action(state):
     sample = random.random()
     eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1. * episodes_done / EPS_DECAY)
@@ -273,14 +286,14 @@ def select_action(state):
     else:
         return torch.tensor([[env.action_space.sample()]], device = device, dtype = torch.long)
 
-
+# Track the durations through the episodes of cartpole, high is better (basically track performance for this environment)
 episode_durations = []
 
-
+# Optimization
 def optimize_model():
     if len(memory) < BATCH_SIZE:
         return
-
+    # Samples chosen randomly from memory
     batch = memory.sample().to(device)
     states, actions, next_states, rewards, terminations = (batch.get(key) for key in ("state", "action", "next_state", "reward", "terminated"))
     actions = actions.squeeze()
@@ -314,6 +327,8 @@ def optimize_model():
 num_episodes = 10000
 episode_rewards = []
 
+# Train for the desired # of episodes
+
 i = 0
 for i in range(num_episodes):
     ep_step_count = 0
@@ -321,13 +336,16 @@ for i in range(num_episodes):
     state, info = env.reset()
     imnum = 0
     for I in imshow(torch.from_numpy(np.array(state))):
+	#This for loop takes the state (which in the envvrionment is defined by an image of the entire gym environment) and creates a image out of the state. since each state has 4 images. We essentially loop through all four images and create an image of out the state.    
     	imnum += 1
     	I8 = (((I - I.min()) / (I.max() - I.min())) * 255.9).astype(np.uint8)
     	img = Image.fromarray(I8)
     	if save_image:
+	#When save_image flag is turned on this basically takes the image then saves it onto Episode with i representing the episode number. inum is the # in the sequence of 4 images
     		img.save(f"./images/Episode:{i}:0:{imnum}.png")
 
     state = torch.from_numpy(normalize(np.array(state))).to(device)
+    #We are taking the numpy array and then normalizing the state array to make the Neural Network calculations easier. We normalize it after saving the image to keep the image quality in tact. Keep in mind this step is bewteen the image being saved and the state being fed into the select action function (this function essentially feeds it into the neural network)
 
     running_reward = 0
     # Continue until termination
@@ -345,14 +363,17 @@ for i in range(num_episodes):
             break
             
         imnum = 0    
-        #plt.imsave(f"./images/Episode:{i}:{t}.png", imshow(torch.from_numpy(np.array(next_state))).copy(order='C'))
+        
         for I in imshow(torch.from_numpy(np.array(next_state))):
+		#The for loop creates the image from the next_state vector.
         	imnum += 1
         	I8 = (((I - I.min()) / (I.max() - I.min())) * 255.9).astype(np.uint8)
         	img = Image.fromarray(I8)
         	if save_image:
+		#When save_image flag is turned on this basically takes the image then saves it onto Episode with i representing the episode number. inum is the # in the sequence of 4 images
         		img.save(f"./images/Episode:{i}:{t}:{imnum}.png")
         next_state = torch.from_numpy(normalize(np.array(next_state))).to(device)
+	#Here we normalize the next_state vector to make the Neural Network calculations easier. We normalize it after saving the image to keep the image quality in tact.    
         state = next_state
 
         terminated = torch.tensor([terminated], dtype = torch.bool, device = device)
